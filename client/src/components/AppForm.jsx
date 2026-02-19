@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createApp, startApp } from '../api/apps';
+import DeployLog from './DeployLog';
 
 const EMPTY_ENV_ROW = { key: '', value: '' };
 
@@ -10,8 +11,10 @@ export default function AppForm({ onCreated, onCancel }) {
   const [startCommand, setStartCommand] = useState('');
   const [envRows, setEnvRows] = useState([{ ...EMPTY_ENV_ROW }]);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [launchAfterCreate, setLaunchAfterCreate] = useState(true);
+  const [createdAppId, setCreatedAppId] = useState(null);
 
   const addEnvRow = () => setEnvRows([...envRows, { ...EMPTY_ENV_ROW }]);
 
@@ -29,6 +32,8 @@ export default function AppForm({ onCreated, onCancel }) {
     e.preventDefault();
     setError('');
     setLoading(true);
+    setStatus('Создание приложения...');
+    setCreatedAppId(null);
 
     try {
       // Build env_vars object from rows
@@ -47,22 +52,29 @@ export default function AppForm({ onCreated, onCancel }) {
         env_vars,
       });
 
+      setCreatedAppId(app.id);
+
       if (launchAfterCreate) {
+        setStatus('Клонирование репозитория и запуск...');
         try {
           await startApp(app.id);
+          setStatus('');
+          onCreated(app.id);
         } catch (err) {
           setError(`Приложение создано, но запуск не удался: ${err.response?.data?.error || err.message}`);
           setLoading(false);
-          onCreated(app.id);
+          setStatus('');
           return;
         }
+      } else {
+        setStatus('');
+        onCreated(app.id);
       }
-
-      onCreated(app.id);
     } catch (err) {
       setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
+      setStatus('');
     }
   };
 
@@ -83,6 +95,31 @@ export default function AppForm({ onCreated, onCancel }) {
       {error && (
         <div className="bg-red-900/50 border border-red-700 text-red-200 rounded-lg p-3 mb-4 text-sm">
           {error}
+          {createdAppId && (
+            <button
+              onClick={() => onCreated(createdAppId)}
+              className="ml-3 underline text-red-300 hover:text-white transition-colors"
+            >
+              Перейти к приложению →
+            </button>
+          )}
+        </div>
+      )}
+
+      {status && (
+        <div className="bg-indigo-900/50 border border-indigo-700 text-indigo-200 rounded-lg p-3 mb-4 text-sm flex items-center gap-2">
+          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          {status}
+        </div>
+      )}
+
+      {/* Deploy Log Console — shows once app is created */}
+      {createdAppId && (
+        <div className="mb-4">
+          <DeployLog appId={createdAppId} expanded={true} />
         </div>
       )}
 
@@ -211,4 +248,5 @@ export default function AppForm({ onCreated, onCancel }) {
     </div>
   );
 }
+
 

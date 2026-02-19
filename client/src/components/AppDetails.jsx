@@ -7,6 +7,7 @@ import {
   deleteApp,
   fetchLogs,
 } from '../api/apps';
+import DeployLog from './DeployLog';
 
 export default function AppDetails({ appId, onDeleted, onUpdated }) {
   const [app, setApp] = useState(null);
@@ -244,7 +245,12 @@ export default function AppDetails({ appId, onDeleted, onUpdated }) {
         </button>
       </div>
 
-      {/* Logs */}
+      {/* Deploy Log Console */}
+      <div className="mb-6">
+        <DeployLog appId={appId} />
+      </div>
+
+      {/* PM2 Process Logs */}
       {showLogs && (
         <div className="space-y-4">
           <div>

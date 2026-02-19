@@ -14,14 +14,23 @@ function connect() {
 
 export async function startApp({ name, script, cwd, env = {} }) {
   await connect();
+
+  // Parse the command: e.g. "npm start" → interpreter "npm", args ["start"]
+  // or "node index.js" → interpreter "node", args ["index.js"]
+  const parts = script.trim().split(/\s+/);
+  const command = parts[0];
+  const args = parts.slice(1);
+
   return new Promise((resolve, reject) => {
     pm2.start(
       {
         name,
-        script,
+        script: command,
+        args: args.join(' '),
         cwd,
         env,
         autorestart: true,
+        interpreter: 'none', // let the OS resolve the command (npm, node, etc.)
       },
       (err, proc) => {
         pm2.disconnect();
