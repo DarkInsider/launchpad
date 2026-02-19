@@ -8,6 +8,23 @@
   "main": "index.mjs",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.mjs"
+    "start": "node index.mjs",
+    "dev:server": "node --watch index.mjs",
+    "dev:client": "cd client && npm run dev",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "build": "cd client && npm run build",
+    "migrate": "npx knex --esm --knexfile knexfile.mjs migrate:latest"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "knex": "^3.1.0",
+    "mysql2": "^3.17.3",
+    "pm2": "^6.0.14",
+    "simple-git": "^3.31.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
