@@ -36,8 +36,8 @@ async function start() {
     process.exit(1);
   }
 
-  app.listen(PORT, () => {
-    console.log(`🚀 Launchpad server running on http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Launchpad server running on http://0.0.0.0:${PORT}`);
   });
 }
 
