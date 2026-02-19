@@ -1,99 +1,88 @@
-import pm2 from 'pm2';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-function connect() {
-  return new Promise((resolve, reject) => {
-    pm2.connect(false, (err) => {
-      if (err) return reject(err);
-      resolve();
-    });
-  });
-}
+const execAsync = promisify(exec);
+
+// Resolve PM2 binary path (use the local one from node_modules)
+import { fileURLToPath } from 'url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PM2_BIN = path.resolve(__dirname, '..', 'node_modules', '.bin', 'pm2');
 
 export async function startApp({ name, script, cwd, env = {} }) {
-  await connect();
+  // Delete existing process with same name (ignore errors)
+  try {
+    await execAsync(`"${PM2_BIN}" delete "${name}"`, { cwd });
+  } catch {
+    // ignore — process may not exist
+  }
 
-  // Parse the command: e.g. "npm start" → interpreter "npm", args ["start"]
-  // or "node index.js" → interpreter "node", args ["index.js"]
+  // Use PM2 CLI to start — much more reliable than programmatic API
+  // For shell commands like "npm run start", we use: pm2 start npm --name "x" -- run start
+  // For direct scripts like "node index.js", we use: pm2 start index.js --name "x"
   const parts = script.trim().split(/\s+/);
-  const command = parts[0];
-  const args = parts.slice(1);
+  let pm2Cmd;
 
-  return new Promise((resolve, reject) => {
-    pm2.start(
-      {
-        name,
-        script: command,
-        args: args.join(' '),
-        cwd,
-        env,
-        autorestart: true,
-        interpreter: 'none', // let the OS resolve the command (npm, node, etc.)
-      },
-      (err, proc) => {
-        pm2.disconnect();
-        if (err) return reject(err);
-        resolve(proc);
-      }
-    );
+  if (parts[0] === 'npm') {
+    // npm start, npm run start, npm run dev, etc.
+    const npmArgs = parts.slice(1).join(' ');
+    pm2Cmd = `"${PM2_BIN}" start npm --name "${name}" --no-autorestart -- ${npmArgs}`;
+  } else if (parts[0] === 'node') {
+    // node index.js, node server.js, etc.
+    const nodeArgs = parts.slice(1).join(' ');
+    pm2Cmd = `"${PM2_BIN}" start ${nodeArgs} --name "${name}"`;
+  } else {
+    // Generic command — wrap in bash -c
+    pm2Cmd = `"${PM2_BIN}" start bash --name "${name}" --no-autorestart -- -c "${script.replace(/"/g, '\\"')}"`;
+  }
+
+  const { stdout, stderr } = await execAsync(pm2Cmd, {
+    cwd,
+    env: { ...process.env, ...env },
+    timeout: 30000,
   });
+
+  return { stdout, stderr };
 }
 
 export async function stopApp(name) {
-  await connect();
-  return new Promise((resolve, reject) => {
-    pm2.stop(name, (err, proc) => {
-      pm2.disconnect();
-      if (err) return reject(err);
-      resolve(proc);
-    });
-  });
+  const { stdout } = await execAsync(`"${PM2_BIN}" stop "${name}"`, { timeout: 15000 });
+  return stdout;
 }
 
 export async function restartApp(name) {
-  await connect();
-  return new Promise((resolve, reject) => {
-    pm2.restart(name, (err, proc) => {
-      pm2.disconnect();
-      if (err) return reject(err);
-      resolve(proc);
-    });
-  });
+  const { stdout } = await execAsync(`"${PM2_BIN}" restart "${name}"`, { timeout: 15000 });
+  return stdout;
 }
 
 export async function deleteApp(name) {
-  await connect();
-  return new Promise((resolve, reject) => {
-    pm2.delete(name, (err, proc) => {
-      pm2.disconnect();
-      if (err) return reject(err);
-      resolve(proc);
-    });
-  });
+  const { stdout } = await execAsync(`"${PM2_BIN}" delete "${name}"`, { timeout: 15000 });
+  return stdout;
 }
 
 export async function getStatus(name) {
-  await connect();
-  return new Promise((resolve, reject) => {
-    pm2.describe(name, (err, desc) => {
-      pm2.disconnect();
-      if (err) return reject(err);
-      if (!desc || desc.length === 0) {
-        return resolve({ status: 'not_found' });
-      }
-      const proc = desc[0];
-      resolve({
-        status: proc.pm2_env?.status || 'unknown',
-        cpu: proc.monit?.cpu || 0,
-        memory: proc.monit?.memory || 0,
-        uptime: proc.pm2_env?.pm_uptime || null,
-        restarts: proc.pm2_env?.restart_time || 0,
-        pid: proc.pid,
-      });
-    });
-  });
+  try {
+    const { stdout } = await execAsync(`"${PM2_BIN}" jlist`, { timeout: 10000 });
+    const list = JSON.parse(stdout);
+    const proc = list.find((p) => p.name === name);
+
+    if (!proc) {
+      return { status: 'not_found' };
+    }
+
+    return {
+      status: proc.pm2_env?.status || 'unknown',
+      cpu: proc.monit?.cpu || 0,
+      memory: proc.monit?.memory || 0,
+      uptime: proc.pm2_env?.pm_uptime || null,
+      restarts: proc.pm2_env?.restart_time || 0,
+      pid: proc.pid,
+    };
+  } catch {
+    return { status: 'not_found' };
+  }
 }
 
 export async function getLogs(name, lines = 100) {
