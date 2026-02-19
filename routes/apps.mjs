@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { exec } from 'child_process';
+import fs from 'fs';
 import db from '../db/index.mjs';
 import * as pm2Service from '../services/pm2.mjs';
 import * as gitService from '../services/git.mjs';
@@ -193,6 +194,15 @@ router.delete('/:id', async (req, res) => {
 
     await db('apps').where({ id: req.params.id }).del();
     logger.success(app.id, 'Приложение удалено из базы данных');
+
+    // Remove cloned repo directory
+    const repoDir = gitService.getRepoDir(app.pm2_name);
+    try {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+      logger.info(app.id, `Директория репозитория удалена: ${repoDir}`);
+    } catch {
+      logger.warn(app.id, `Не удалось удалить директорию: ${repoDir}`);
+    }
 
     logger.clearLogs(app.id);
 
