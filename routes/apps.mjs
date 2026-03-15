@@ -290,6 +290,87 @@ router.post('/:id/start', async (req, res) => {
 });
 
 // =====================
+// POST /api/apps/:id/redeploy — stop, pull latest, rebuild, start
+// =====================
+router.post('/:id/redeploy', async (req, res) => {
+  const appId = req.params.id;
+  try {
+    const app = await db('apps').where({ id: appId }).first();
+    if (!app) return res.status(404).json({ error: 'App not found' });
+
+    // 1. Stop existing PM2 process (if running)
+    logger.step(appId, '🔁 Редеплой: остановка текущего процесса...');
+    try {
+      await pm2Service.deleteApp(app.pm2_name);
+      logger.info(appId, 'PM2 процесс остановлен и удалён');
+    } catch {
+      logger.warn(appId, 'PM2 процесс не найден (возможно, не был запущен)');
+    }
+
+    // 2. Pull latest code
+    logger.step(appId, `📦 Обновление репозитория: ${app.repo_url}`);
+    let repoDir;
+    try {
+      repoDir = await gitService.cloneOrPull(app.repo_url, app.pm2_name);
+      logger.success(appId, `Репозиторий обновлён: ${repoDir}`);
+    } catch (err) {
+      logger.error(appId, `Ошибка обновления репозитория: ${err.message}`);
+      throw err;
+    }
+
+    // 3. Parse env vars
+    let envVars = {};
+    try {
+      envVars = JSON.parse(app.env_vars || '{}');
+    } catch {
+      logger.warn(appId, 'Не удалось распарсить env_vars, используем пустой объект');
+    }
+
+    // 4. Run build command if present
+    if (app.build_command && app.build_command.trim()) {
+      logger.step(appId, `🔨 Выполняем команду сборки: ${app.build_command}`);
+      try {
+        await execWithLogs(app.build_command, {
+          cwd: repoDir,
+          env: { ...process.env, ...envVars },
+          maxBuffer: 10 * 1024 * 1024,
+        }, appId);
+        logger.success(appId, 'Сборка завершена успешно');
+      } catch (err) {
+        logger.error(appId, `Ошибка сборки: ${err.message}`);
+        throw err;
+      }
+    }
+
+    // 5. Start via PM2
+    logger.step(appId, `🚀 Запускаем через PM2: ${app.start_command}`);
+    try {
+      await pm2Service.startApp({
+        name: app.pm2_name,
+        script: app.start_command,
+        cwd: repoDir,
+        env: envVars,
+      });
+      logger.success(appId, `PM2 процесс "${app.pm2_name}" запущен`);
+    } catch (err) {
+      logger.error(appId, `Ошибка запуска PM2: ${err.message}`);
+      throw err;
+    }
+
+    // 6. Update status in DB
+    await db('apps').where({ id: app.id }).update({ status: 'running', updated_at: db.fn.now() });
+    logger.success(appId, '✅ Редеплой завершён успешно!');
+
+    const updated = await db('apps').where({ id: app.id }).first();
+    res.json(updated);
+  } catch (err) {
+    await db('apps').where({ id: appId }).update({ status: 'errored', updated_at: db.fn.now() }).catch(() => {});
+    logger.error(appId, `❌ Редеплой не удался: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================
 // POST /api/apps/:id/stop
 // =====================
 router.post('/:id/stop', async (req, res) => {
